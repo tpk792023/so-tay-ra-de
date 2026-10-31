@@ -54,7 +54,7 @@ p{margin:0}
 .brand b{font-family:var(--f-display);font-size:19px}
 .brand small{display:block;color:var(--muted);font-size:12px;letter-spacing:.04em}
 .mark{width:34px;height:34px;flex:none}
-.status{font-size:13px;color:var(--muted)}
+.status{display:inline-flex;align-items:center;font-size:13px;line-height:1.6;padding:3px 12px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:500;white-space:nowrap}
 .steps{display:flex;flex-wrap:wrap;gap:4px;padding-block:8px}
 .step{display:flex;align-items:center;gap:8px;border:none;background:none;padding:8px 12px;border-radius:9px;cursor:pointer;color:var(--nav-ink);font-weight:600;font-size:14px}
 .step .n{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;background:var(--nav-hi);color:var(--nav-ink);font-variant-numeric:tabular-nums}
@@ -221,7 +221,7 @@ function etplPreset(k){return {preset:k,names:{...PART},abObj:'Phần trắc ngh
 function tplPreset(k){const v=PRESETS[k].v;return {preset:k,mTitle:'Ma trận đề kiểm tra',sTitle:'Bản đặc tả đề kiểm tra',include:'both',sign:true,signs:SIGNS.map(s=>s.slice()),...v,lv:v.lv.slice()}}
 function blank(){
   return {v:1,sample:false,view:'info',
-    info:{dept:'Sở GD&ĐT',school:'Trường THPT',group:'Tổ Toán – Tin',subject:'',grade:'',year:'2026 – 2027',title:'Kiểm tra giữa học kỳ I',duration:45,score:10,codes:4,codeStart:101},
+    info:{dept:'',school:'Trường TH&THCS Đa Phước',group:'Tổ Toán – Tin',subject:'',grade:'',year:'2026 – 2027',title:'Kiểm tra giữa học kỳ I',duration:45,score:10,codes:4,codeStart:101},
     points:{mcq:0.25,tf:1,short:0.5,essay:1},
     target:{mcq:[6,4,2],tf:[1,2,1],short:[2,2,2],essay:[0,0,0]},
     topics:[],questions:[],
@@ -233,7 +233,7 @@ function mk(type,level,topic,stem,x){const q=newQ(type,level);q.topic=topic;q.st
 function sample(){
   const s=blank();
   s.sample=true;
-  Object.assign(s.info,{dept:'Phòng GD&ĐT Quận 3',school:'Trường THCS Lê Lợi',group:'Tổ Toán',subject:'Toán',grade:'8',title:'Kiểm tra giữa học kỳ I',duration:60,codes:4,codeStart:101});
+  Object.assign(s.info,{dept:'',school:'Trường TH&THCS Đa Phước',group:'Tổ Toán',subject:'Toán',grade:'8',title:'Kiểm tra giữa học kỳ I',duration:60,codes:4,codeStart:101});
   s.points={mcq:0.25,tf:1,short:0.5,essay:2};
   s.target={mcq:[4,3,1],tf:[0,1,1],short:[1,2,1],essay:[0,1,1]};
   const A='Đa thức',H='Hằng đẳng thức đáng nhớ',P='Phân tích đa thức thành nhân tử',C1='Chương I. Đa thức',C2='Chương II. Hằng đẳng thức đáng nhớ và ứng dụng';
@@ -266,7 +266,7 @@ function load(){
   try{const raw=localStorage.getItem(KEY);if(raw){const d=JSON.parse(raw);if(d&&Array.isArray(d.questions))return fix(d)}}catch(_){}
   return sample();
 }
-function fix(d){const b=blank();d.info={...b.info,...d.info};d.points={...b.points,...d.points};d.target={...b.target,...d.target};d.ui={...b.ui,...d.ui};d.tpl={...b.tpl,...d.tpl};d.etpl={...b.etpl,...d.etpl,names:{...b.etpl.names,...((d.etpl||{}).names)}};d.tpl.lv=(d.tpl.lv||DEFLV).slice(0,3);if(d.tpl.signs&&d.tpl.signs[0][0]==='Người ra đề'&&d.tpl.signs[2][0]==='Duyệt của Ban giám hiệu')d.tpl.signs.reverse();d.topics=(d.topics||[]).map(t=>({chapter:'',name:'',req:'',...t}));if(d.sample)d.topics=sample().topics;d.questions=d.questions.map(q=>({...newQ(),...q}));d.view=d.view||'info';return d}
+function fix(d){const b=blank();if(d.info){if(d.info.school==='Trường THCS Lê Lợi')d.info.school=b.info.school;if(d.info.dept==='Phòng GD&ĐT Quận 3'||d.info.dept==='Sở GD&ĐT')d.info.dept=''}d.info={...b.info,...d.info};d.points={...b.points,...d.points};d.target={...b.target,...d.target};d.ui={...b.ui,...d.ui};d.tpl={...b.tpl,...d.tpl};d.etpl={...b.etpl,...d.etpl,names:{...b.etpl.names,...((d.etpl||{}).names)}};d.tpl.lv=(d.tpl.lv||DEFLV).slice(0,3);if(d.tpl.signs&&d.tpl.signs[0][0]==='Người ra đề'&&d.tpl.signs[2][0]==='Duyệt của Ban giám hiệu')d.tpl.signs.reverse();d.topics=(d.topics||[]).map(t=>({chapter:'',name:'',req:'',...t}));if(d.sample)d.topics=sample().topics;d.questions=d.questions.map(q=>({...newQ(),...q}));d.view=d.view||'info';return d}
 let saveTimer;
 function save(){
   clearTimeout(saveTimer);
@@ -337,8 +337,8 @@ const TD='border:1px solid #000;padding:2pt 6pt;text-align:center';
 function sheetHeader(code){
   const i=S.info;
   let h=`<table style="width:100%;border-collapse:collapse;${SH}"><tr>
-  <td style="width:42%;text-align:center;vertical-align:top;padding:0 6pt">${esc(i.dept).toUpperCase()}<br><b>${esc(i.school).toUpperCase()}</b>${i.group?`<br>${esc(i.group)}`:''}</td>
-  <td style="text-align:center;vertical-align:top;padding:0 6pt"><b>${esc(i.title).toUpperCase()}</b><br><b>Môn: ${esc(i.subject||'…')} – Lớp ${esc(i.grade||'…')}</b><br>Năm học ${esc(i.year)}<br><i>Thời gian làm bài: ${esc(i.duration)} phút, không kể thời gian phát đề</i></td></tr></table>`;
+  <td style="width:42%;text-align:center;vertical-align:top;padding:0 6pt">${i.dept?esc(String(i.dept).toUpperCase())+'<br>':''}<b>${esc(String(i.school).toUpperCase())}</b>${i.group?`<br>${esc(i.group)}`:''}</td>
+  <td style="text-align:center;vertical-align:top;padding:0 6pt"><b>${esc(String(i.title).toUpperCase())}</b><br><b>Môn: ${esc(i.subject||'…')} – Lớp ${esc(i.grade||'…')}</b><br>Năm học ${esc(i.year)}<br><i>Thời gian làm bài: ${esc(i.duration)} phút, không kể thời gian phát đề</i></td></tr></table>`;
   if(code!=null)h+=`<p style="margin:12pt 0 6pt;${SH}">Họ và tên học sinh: ........................................................ Lớp: .............. &nbsp; <b style="border:1px solid #000;padding:1pt 8pt">Mã đề ${code}</b></p>`;
   return h;
 }
@@ -391,8 +391,8 @@ function runsHTML(runs){return runs.map(r=>r.fld?'…':(r[1].b?'<b>':'')+(r[1].i
 function examHeadHTML(code){
   const i=S.info,X=S.etpl,st=examStyle();
   return `<table style="width:100%;border-collapse:collapse;${st}"><tr>
-  <td style="width:42%;text-align:center;vertical-align:top;padding:0 6pt">${esc(i.dept).toUpperCase()}<br><b>${esc(i.school).toUpperCase()}</b>${i.group?`<br>${esc(i.group)}`:''}${X.official?`<br><br><b style="border:1px solid #000;padding:1pt 6pt">ĐỀ CHÍNH THỨC</b>`:''}${X.pages?'<br><i>(Đề có … trang)</i>':''}</td>
-  <td style="text-align:center;vertical-align:top;padding:0 6pt"><b>${esc(i.title).toUpperCase()}</b><br><b>Môn: ${esc(i.subject||'…')} – Lớp ${esc(i.grade||'…')}</b><br>Năm học ${esc(i.year)}<br><i>Thời gian làm bài: ${esc(i.duration)} phút, không kể thời gian phát đề</i></td></tr></table>
+  <td style="width:42%;text-align:center;vertical-align:top;padding:0 6pt">${i.dept?esc(String(i.dept).toUpperCase())+'<br>':''}<b>${esc(String(i.school).toUpperCase())}</b>${i.group?`<br>${esc(i.group)}`:''}${X.official?`<br><br><b style="border:1px solid #000;padding:1pt 6pt">ĐỀ CHÍNH THỨC</b>`:''}${X.pages?'<br><i>(Đề có … trang)</i>':''}</td>
+  <td style="text-align:center;vertical-align:top;padding:0 6pt"><b>${esc(String(i.title).toUpperCase())}</b><br><b>Môn: ${esc(i.subject||'…')} – Lớp ${esc(i.grade||'…')}</b><br>Năm học ${esc(i.year)}<br><i>Thời gian làm bài: ${esc(i.duration)} phút, không kể thời gian phát đề</i></td></tr></table>
   <table style="width:100%;border-collapse:collapse;margin:12pt 0 6pt;${st}"><tr><td style="vertical-align:top">Họ và tên học sinh: ................................................ Lớp: ..........${X.sbd?'<br>Số báo danh: ....................':''}</td>${X.codeBox?`<td style="width:25%;text-align:right;vertical-align:top"><b style="border:1px solid #000;padding:1pt 8pt">Mã đề ${code}</b></td>`:''}</tr></table>`;
 }
 function examHTML(code){
@@ -526,7 +526,7 @@ function signHTML(){
 }
 function partHTML(k,first,last){
   const T=S.tpl;let h=first?sheetHeader(null):'';
-  h+=`<p style="margin:12pt 0 2pt;text-align:center;${SH}"><b>${esc(k==='m'?T.mTitle:T.sTitle).toUpperCase()}</b></p><p style="margin:0 0 8pt;text-align:center;${SH}"><i>${esc(subtitle())}</i></p>`;
+  h+=`<p style="margin:12pt 0 2pt;text-align:center;${SH}"><b>${esc(String(k==='m'?T.mTitle:T.sTitle).toUpperCase())}</b></p><p style="margin:0 0 8pt;text-align:center;${SH}"><i>${esc(subtitle())}</i></p>`;
   h+=htmlTable(buildTable(k==='s'),T.font);
   if(last&&T.sign)h+=signHTML();
   return `<div style="${SH}">${h}</div>`;
@@ -564,7 +564,7 @@ function oxTable(m,W,sz){
 }
 function oxHead(W,sz){
   const i=S.info;
-  const L=oxP(String(i.dept).toUpperCase(),{sz})+oxP(String(i.school).toUpperCase(),{b:true,sz})+(i.group?oxP(i.group,{sz}):'');
+  const L=(i.dept?oxP(String(i.dept).toUpperCase(),{sz}):'')+oxP(String(i.school).toUpperCase(),{b:true,sz})+(i.group?oxP(i.group,{sz}):'');
   const R=oxP(String(i.title).toUpperCase(),{b:true,sz})+oxP(`Năm học ${i.year}`,{sz});
   return oxPlain([L,R],W,[.42,.58]);
 }
@@ -612,7 +612,7 @@ function oxOpts(b,W,sz){
 }
 function oxExamHead(code,W,sz){
   const i=S.info,X=S.etpl;
-  let L=oxP(String(i.dept).toUpperCase(),{sz})+oxP(String(i.school).toUpperCase(),{b:true,sz})+(i.group?oxP(i.group,{sz}):'');
+  let L=(i.dept?oxP(String(i.dept).toUpperCase(),{sz}):'')+oxP(String(i.school).toUpperCase(),{b:true,sz})+(i.group?oxP(i.group,{sz}):'');
   if(X.official)L+=oxRP([['ĐỀ CHÍNH THỨC',{b:true,box:true}]],{al:'c',before:120,sz});
   if(X.pages)L+=oxRP([['(Đề có ',{i:true}],{fld:'SECTIONPAGES',i:true},[' trang)',{i:true}]],{al:'c',sz});
   const R=oxP(String(i.title).toUpperCase(),{b:true,sz})+oxP(`Môn: ${i.subject||'…'} – Lớp ${i.grade||'…'}`,{b:true,sz})+oxP(`Năm học ${i.year}`,{sz})+oxP(`Thời gian làm bài: ${i.duration} phút, không kể thời gian phát đề`,{i:true,sz});
@@ -820,7 +820,7 @@ V.info=()=>{
   return `${sampleNotice()}<div class="lead"><div class="eyebrow">Bước 1 / 5</div><h1>Thông tin đề</h1><p class="sub">Những dòng này in ở đầu tờ đề và đáp án. Có thể sửa bất cứ lúc nào.</p></div>
   <div class="grid2">
     <section class="card"><h2>Đơn vị</h2><div class="form">
-      ${f('dept','Sở / Phòng GD&ĐT')}${f('school','Trường')}${f('group','Tổ chuyên môn')}${f('year','Năm học')}
+      ${f('dept','UBND','text','placeholder="Ví dụ: UBND xã …"')}${f('school','Trường')}${f('group','Tổ chuyên môn')}${f('year','Năm học')}
     </div></section>
     <section class="card"><h2>Bài kiểm tra</h2><div class="form">
       <div class="field wide">${f('title','Tên bài kiểm tra')}</div>
