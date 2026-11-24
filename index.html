@@ -266,7 +266,7 @@ function blank(){
   return {v:1,sample:false,view:'info',
     info:{dept:'UBND xã Vĩnh Hậu',school:'Trường TH&THCS Đa Phước',group:'Tổ Toán – Tin',subject:'',grade:'',year:'2026 – 2027',title:'Kiểm tra giữa học kỳ I',duration:45,score:10,codes:4,codeStart:101},
     points:{mcq:0.25,tf:1,short:0.5,essay:1},
-    target:{mcq:[6,4,2],tf:[1,2,1],short:[2,2,2],essay:[0,0,0]},
+    target:{mcq:[6,4,2],tf:[1,2,1],short:[0,0,0],essay:[0,0,0]},
     topics:[],questions:[],
     ui:{filter:'all',code:101,shuffleQ:true,shuffleO:true,mode:'exam'},
     tpl:tplPreset('dp'),
@@ -874,81 +874,120 @@ function tplPanel(){
 }
 
 /* ---------- prompt cho AI ---------- */
+/* Lập câu lệnh bám đúng ma trận – đặc tả: mỗi câu ghi rõ dạng, mức độ, bài và yêu cầu cần đạt.
+   Chỉ nêu những dạng câu có trong ma trận (không dùng trả lời ngắn thì không nhắc tới). */
+const isBlankQ=q=>!String(q.stem||'').trim()&&(q.type!=='mcq'||q.options.every(o=>!String(o).trim()))&&(q.type!=='tf'||q.tf.every(x=>!String(x.text).trim()))&&!String(q.short||'').trim()&&!String(q.essay||'').trim();
+const tfLv=(q,k)=>{const x=q.tf[k]||{};return (x.level===0||x.level)?+x.level:q.level};
+const topicReq=(name,lvs)=>{const t=S.topics.find(x=>x.name===name);if(!t||!t.req)return '';
+  const ls=t.req.split(/\n+/).map(x=>x.trim()).filter(Boolean),names=[...new Set(lvs||[])].map(l=>String(LV[l]||'').toLowerCase());
+  const pick=ls.filter(x=>names.some(n=>n&&x.toLowerCase().startsWith(n)));
+  return (pick.length?pick:ls).join(' ')};
+function aiPlan(){
+  /* các "ô câu hỏi" cần soạn, theo thứ tự đánh số của đề */
+  const nm=numMap(),slots=[];
+  let n=0;const next=()=>++n;
+  const empty=TYK.flatMap(t=>byType(t)).filter(isBlankQ);
+  if(empty.length){
+    TYK.forEach(t=>byType(t).forEach(q=>{
+      const each=t==='tf'&&S.tfEach;
+      const num=each?q.tf.map((_,k)=>nm[q.id+':'+k]):[nm[q.id]];
+      if(isBlankQ(q))slots.push({t,q,num:num.map(x=>x||next()),lv:each?q.tf.map((_,k)=>tfLv(q,k)):[q.level],topic:q.topic,pts:qp(q)});
+    }));
+    /* số thứ tự lấy theo đề nếu có, nếu không thì đánh liên tục */
+    if(slots.some(s=>s.num.some(x=>!x))){n=0;slots.forEach(s=>s.num=s.num.map(next))}
+    return slots;
+  }
+  /* chưa có ô câu hỏi: dựa vào số câu còn thiếu trong ma trận */
+  const a=actual();let need=TYK.map(t=>[t,[0,1,2].map(l=>Math.max(0,(+S.target[t][l]||0)-a[t][l]))]);
+  if(!need.some(([,v])=>v.some(Boolean)))need=TYK.map(t=>[t,[0,1,2].map(l=>+S.target[t][l]||0)]);
+  n=units(S.questions).length;
+  need.forEach(([t,v])=>{
+    if(t==='tf'&&S.tfEach){const lv=[];v.forEach((c,l)=>{for(let i=0;i<c;i++)lv.push(l)});for(let i=0;i<lv.length;i+=4){const g=lv.slice(i,i+4);slots.push({t,num:g.map(next),lv:g,topic:'',pts:per('tf')*g.length})}}
+    else v.forEach((c,l)=>{for(let i=0;i<c;i++)slots.push({t,num:[next()],lv:[l],topic:'',pts:+S.points[t]||0})});
+  });
+  return slots;
+}
 function aiPrompt(){
-  const i=S.info,a=actual();
-  let need=[];
-  TYK.forEach(t=>[0,1,2].forEach(l=>{const n=(+S.target[t][l]||0)-a[t][l];if(n>0)need.push(`- ${n} câu ${TY[t].replace(' / ','/')}, mức ${LV[l]}`)}));
-  if(!need.length)TYK.forEach(t=>[0,1,2].forEach(l=>{const n=+S.target[t][l]||0;if(n>0)need.push(`- ${n} câu ${TY[t].replace(' / ','/')}, mức ${LV[l]}`)}));
-  const tops=S.topics.filter(t=>t.name).map(t=>`- ${t.name}${t.req?': '+t.req:''}`);
-  return `Bạn là giáo viên môn ${i.subject||'[môn học]'} lớp ${i.grade||'[lớp]'}, soạn câu hỏi kiểm tra theo Chương trình GDPT 2018.
+  const i=S.info,P=aiPlan(),used=new Set(P.map(s=>s.t)),each=S.tfEach;
+  const byPlan=P.some(s=>s.topic);
+  const tops=S.topics.filter(t=>t.name).map(t=>`- ${t.chapter?t.chapter+' – ':''}${t.name}${!byPlan&&t.req?': '+t.req.replace(/\s*\n\s*/g,' '):''}`);
+  const lv=l=>LV[l]||LV[0];
+  const where=s=>s.topic?` – ${s.topic}${topicReq(s.topic,s.lv)?` (${topicReq(s.topic,s.lv)})`:''}`:'';
+  const list=P.map(s=>{
+    if(s.t==='tf'&&each)return `- Câu ${s.num[0]} đến Câu ${s.num[s.num.length-1]}: Đúng/Sai, chung một câu dẫn, ${s.num.length} nhận định, mỗi nhận định là một câu (${s.num.map((x,k)=>`Câu ${x}: ${lv(s.lv[k])}`).join('; ')})${where(s)}`;
+    if(s.t==='tf')return `- Câu ${s.num[0]}: Đúng/Sai gồm 4 ý a) b) c) d), mức ${lv(s.lv[0])}${where(s)}`;
+    if(s.t==='essay')return `- Câu ${s.num[0]}: Tự luận, mức ${lv(s.lv[0])}, ${vn(s.pts)} điểm${where(s)}`;
+    return `- Câu ${s.num[0]}: ${TY[s.t].replace(' / ','/')}, mức ${lv(s.lv[0])}${where(s)}`;
+  });
+  const req=[`- Đúng kiến thức, bám sách giáo khoa và yêu cầu cần đạt, phù hợp học sinh lớp ${i.grade||'[lớp]'}, không trùng ý giữa các câu.`,
+    '- Soạn đúng số câu, đúng thứ tự, đúng dạng, đúng mức độ và đúng bài như danh sách trên. Không thêm dạng câu nào khác.'];
+  if(used.has('mcq'))req.push('- Câu nhiều lựa chọn có đúng 4 phương án A, B, C, D và chỉ một phương án đúng; phương án nhiễu hợp lí; đáp án đúng rải đều A, B, C, D.');
+  if(used.has('tf'))req.push(each?'- Phần Đúng/Sai: viết một câu dẫn cụ thể (tình huống, thí nghiệm, đoạn thông tin), rồi mỗi nhận định là một câu riêng, đánh số tiếp theo; mỗi câu ghi Đáp án: Đúng hoặc Sai. Có cả câu Đúng và câu Sai; câu Sai phải sai rõ ở một chi tiết.':'- Câu đúng/sai có 4 ý a), b), c), d); có cả ý đúng và ý sai.');
+  if(used.has('short'))req.push('- Câu trả lời ngắn có đáp án là một số, viết không quá 4 ký tự (tính cả dấu trừ và dấu phẩy).');
+  if(used.has('essay'))req.push('- Câu tự luận ghi hướng dẫn chấm và điểm từng ý (bội của 0,25).');
+  req.push('- Không dùng in đậm, không kẻ bảng, không thêm lời dẫn hay lời kết.');
+  const ex=[],bai='Bài: (tên bài như danh sách trên)';
+  let k=1;
+  if(used.has('mcq'))ex.push(`Câu ${k++}. Nội dung câu nhiều lựa chọn\nA. ...\nB. ...\nC. ...\nD. ...\nĐáp án: B\nMức độ: ${LV[0]}\n${bai}`);
+  if(used.has('tf'))ex.push(each?`Câu dẫn: Nội dung tình huống chung cho các câu Đúng/Sai\nCâu ${k}. Nhận định thứ nhất\nĐáp án: Đúng\nMức độ: ${LV[0]}\n${bai}\n\nCâu ${k+1}. Nhận định thứ hai\nĐáp án: Sai\nMức độ: ${LV[1]}\n${bai}`:`Câu ${k}. Nội dung câu dẫn đúng/sai\na) ...\nb) ...\nc) ...\nd) ...\nĐáp án: Đ, S, S, Đ\nMức độ: ${LV[1]}\n${bai}`),k+=each?2:1;
+  if(used.has('short'))ex.push(`Câu ${k++}. Nội dung câu trả lời ngắn\nĐáp án: 12,5\nMức độ: ${LV[2]}\n${bai}`);
+  if(used.has('essay'))ex.push(`Câu ${k++}. [Tự luận] Nội dung câu tự luận\nĐáp án: Hướng dẫn chấm từng ý ...\nĐiểm: 1\nMức độ: ${LV[2]}\n${bai}`);
+  return `Bạn là giáo viên môn ${i.subject||'[môn học]'}${S.tpl.phanMon?` (phân môn ${S.tpl.phanMon})`:''} lớp ${i.grade||'[lớp]'}, soạn câu hỏi kiểm tra theo Chương trình GDPT 2018, sách Kết nối tri thức với cuộc sống.
 Bài kiểm tra: ${i.title}.
 Nội dung kiểm tra:
 ${tops.length?tops.join('\n'):'- [Thầy cô ghi các bài, chủ đề đã dạy vào đây]'}
 
-Hãy soạn:
-${need.join('\n')||'- [số câu cần soạn]'}
+Hãy soạn đúng các câu sau:
+${list.join('\n')||'- [số câu cần soạn]'}
 
 Yêu cầu:
-- Đúng kiến thức, phù hợp học sinh lớp ${i.grade||'[lớp]'}, không trùng ý giữa các câu.
-- Câu nhiều lựa chọn có đúng 4 phương án A, B, C, D và chỉ một phương án đúng; phương án nhiễu hợp lý.
-- Câu đúng/sai có 4 ý a), b), c), d).
-- Câu trả lời ngắn có đáp án là một số, viết không quá 4 ký tự (tính cả dấu trừ và dấu phẩy).
-- Câu tự luận ghi hướng dẫn chấm và điểm từng bước.
+${req.join('\n')}
 
-Trả lời đúng theo mẫu sau, không thêm lời dẫn:
+Trả lời đúng theo mẫu sau (mẫu chỉ minh hoạ cách ghi, số câu theo danh sách trên):
 
-Câu 1. Nội dung câu nhiều lựa chọn
-A. ...
-B. ...
-C. ...
-D. ...
-Đáp án: B
-Mức độ: Biết
-Chủ đề: ...
-
-Câu 2. Nội dung câu đúng/sai
-a) ...
-b) ...
-c) ...
-d) ...
-Đáp án: Đ, S, S, Đ
-Mức độ: Hiểu
-Chủ đề: ...
-
-Câu 3. Nội dung câu trả lời ngắn
-Đáp án: 12,5
-Mức độ: Vận dụng
-Chủ đề: ...
-
-Câu 4. [Tự luận] Nội dung câu tự luận
-Đáp án: Hướng dẫn chấm ...
-Điểm: 1
-Mức độ: Vận dụng
-Chủ đề: ...`;
+${ex.join('\n\n')}`;
 }
 
 /* ---------- đọc văn bản câu hỏi ---------- */
+const LEAD_RE=/^(?:câu dẫn|đoạn dẫn|đoạn thông tin|tình huống|thông tin chung)\s*(?:\([^)]*\))?\s*[:.\-–]?\s*(.*)$/i;
+const RANGE_RE=/(?:từ\s+)?câu\s*\d+\s*(?:[-–]|đến)\s*(?:câu\s*)?\d+/i;
 function parseText(txt,defLevel){
-  const blocks=[];let cur=null;
-  txt.replace(/\r/g,'').split('\n').forEach(raw=>{
-    const line=raw.trim();if(!line)return;
-    const m=line.match(/^Câu\s*(\d+)\s*[.:)]\s*(.*)$/i);
-    if(m){cur=[m[2]];blocks.push(cur);return}
-    if(/^PHẦN\s+[IVX\d]+/i.test(line)&&!cur)return;
-    if(/^PHẦN\s+[IVX\d]+/i.test(line)){cur=null;return}
-    if(cur)cur.push(line);
+  const items=[];let cur=null,lead=null,leadOpen=false;
+  txt.replace(/\r/g,'').replace(/\*\*|__/g,'').split('\n').forEach(raw=>{
+    const line=raw.replace(/^\s*#+\s*/,'').trim();if(!line)return;
+    let m=line.match(/^Câu\s*(\d+)\s*(?:\(([^)]*)\))?\s*[.:)\-–]?\s*(.*)$/i);
+    if(m&&!RANGE_RE.test(line.slice(0,24))){cur={ls:[m[3]],hint:m[2]||'',lead};items.push(cur);leadOpen=false;return}
+    if((m=line.match(LEAD_RE))||RANGE_RE.test(line)){lead={text:[(m?m[1]:line).replace(/^(?:từ\s+)?câu\s*\d+\s*(?:[-–]|đến)\s*(?:câu\s*)?\d+\s*[.:)]?\s*/i,'')]};lead.text=lead.text.filter(Boolean);cur=null;leadOpen=true;return}
+    if(/^PHẦN\s+[IVX\d]+/i.test(line)){cur=null;lead=null;leadOpen=false;return}
+    if(leadOpen&&lead){lead.text.push(line);return}
+    if(cur)cur.ls.push(line);
   });
-  return blocks.map(b=>parseBlock(b,defLevel));
+  const qs=items.map(it=>{const q=parseBlock(it.ls,defLevel,it.hint);q._lead=it.lead;return q});
+  /* gom các nhận định Đúng/Sai liên tiếp (cùng câu dẫn) thành một câu dẫn 4 ý */
+  const out=[];let grp=null;
+  qs.forEach(q=>{
+    if(q.type!=='tfs'){grp=null;delete q._lead;out.push(q);return}
+    if(!grp||grp._lead!==q._lead||grp.tf.length>=4){
+      grp=newQ('tf',q.level);grp._lead=q._lead;grp.topic=q.topic;grp.tf=[];
+      grp.stem=q._lead?q._lead.text.join('\n'):'';out.push(grp);
+    }
+    grp.tf.push(q._lv?{text:q.stem,ans:q._ans,level:q.level}:{text:q.stem,ans:q._ans});
+    if(!grp.topic)grp.topic=q.topic;
+  });
+  out.forEach(q=>{if(q.type==='tf'){while(q.tf.length<4)q.tf.push({text:'',ans:true});const L=q.tf.filter(x=>x.level!=null).map(x=>x.level);if(L.length){q.level=Math.min(...L);q._lv=1}}delete q._lead});
+  return out;
 }
-function parseBlock(ls,defLevel){
+const lvOf=v=>{v=String(v||'').toLowerCase();return /vận|vd/.test(v)?2:/hiểu|th\b|^h$/.test(v)?1:/biết|nb|^b$/.test(v)?0:null};
+function parseBlock(ls,defLevel,hint=''){
   const q=newQ('short',defLevel);
-  const stem=[],opts={},tfs={},ans=[];let inAns=false;
+  const stem=[],opts={},tfs={},ans=[];let inAns=false,hasPts=false;
+  const hl=lvOf(hint);if(hl!=null){q.level=hl;q._lv=1}
   ls.forEach(l=>{
     let m;
-    if((m=l.match(/^(?:Đáp án|ĐA|Lời giải|Hướng dẫn chấm)\s*[:.]\s*(.*)$/i))){inAns=true;if(m[1])ans.push(m[1]);return}
-    if((m=l.match(/^Mức độ\s*[:.]\s*(.*)$/i))){const v=m[1].toLowerCase();q.level=v.includes('vận')?2:v.includes('hiểu')?1:0;inAns=false;return}
-    if((m=l.match(/^Chủ đề\s*[:.]\s*(.*)$/i))){q.topic=m[1].trim();inAns=false;return}
-    if((m=l.match(/^Điểm\s*[:.]\s*([\d.,]+)/i))){q.points=m[1].replace(',','.');inAns=false;return}
+    if((m=l.match(/^(?:Đáp án|ĐA|Lời giải|Hướng dẫn chấm|Trả lời)\s*[:.]\s*(.*)$/i))){inAns=true;if(m[1])ans.push(m[1]);return}
+    if((m=l.match(/^Mức độ\s*[:.]\s*(.*)$/i))){const v=lvOf(m[1]);if(v!=null){q.level=v;q._lv=1}inAns=false;return}
+    if((m=l.match(/^(?:Chủ đề|Bài|Nội dung|Đơn vị kiến thức)\s*[:.]\s*(.*)$/i))){q.topic=matchTopic(m[1].trim());inAns=false;return}
+    if((m=l.match(/^Điểm\s*[:.]\s*([\d.,]+)/i))){q.points=m[1].replace(',','.');hasPts=true;inAns=false;return}
     if(inAns){ans.push(l);return}
     if(/^\*?[A-D]\s*[.)]\s/.test(l)){
       l.split(/\s+(?=\*?[A-D][.)]\s)/).forEach(part=>{const mm=part.match(/^(\*?)([A-D])\s*[.)]\s*(.*)$/);if(mm){opts[mm[2]]=mm[3].trim();if(mm[1])q.answer=mm[2]}});
@@ -958,23 +997,51 @@ function parseBlock(ls,defLevel){
     stem.push(l);
   });
   let st=stem.join('\n').trim();
-  const essayTag=/^\[?\s*tự luận\s*\]?\s*[:.-]?\s*/i;
-  const isEssay=essayTag.test(st);
+  const essayTag=/^[\[(]?\s*tự luận\s*[\])]?\s*[:.\-–]?\s*/i;
+  const isEssay=essayTag.test(st)||/tự luận/i.test(hint);
   if(isEssay)st=st.replace(essayTag,'');
   q.stem=st;
+  const a1=ans.join(' ').trim(),tfAns=a1.toLowerCase().replace(/[.\s]+$/,'');
+  const shortUsed=tsum('short')>0||byType('short').length>0;
   if(Object.keys(opts).length>=2){
     q.type='mcq';q.options=[0,1,2,3].map(k=>opts[ABCD[k]]||'');
-    const m=(ans[0]||'').match(/[A-D]/);if(m)q.answer=m[0];
+    const m=a1.match(/\b[A-D]\b/)||a1.match(/[A-D]/);if(m)q.answer=m[0];
   }else if(Object.keys(tfs).length>=2){
     q.type='tf';
-    const toks=ans.join(' ').split(/[\s,;]+/).map(t=>t.replace(/^[a-d]\)\s*/i,'').toLowerCase()).filter(t=>/^(đ|s|đúng|sai)$/.test(t));
+    const toks=a1.split(/[\s,;]+/).map(t=>t.replace(/^[a-d]\)\s*/i,'').toLowerCase()).filter(t=>/^(đ|s|đúng|sai)$/.test(t));
     q.tf=[0,1,2,3].map(k=>({text:tfs[abcd[k]]||'',ans:toks[k]?toks[k].startsWith('đ'):true}));
-  }else if(isEssay){
+  }else if(/^(đ|s|đúng|sai)$/.test(tfAns)&&!isEssay){
+    q.type='tfs';q._ans=tfAns.startsWith('đ'); /* một nhận định Đúng/Sai tính là một câu */
+  }else if(isEssay||hasPts||!shortUsed||a1.length>12||ans.length>1){
     q.type='essay';q.essay=ans.join('\n');
   }else{
-    q.type='short';q.short=ans.join(' ').trim();
+    q.type='short';q.short=a1;
   }
   return q;
+}
+/* tên bài AI ghi → đúng tên bài trong bản đặc tả */
+function matchTopic(s){
+  const norm=x=>String(x).toLowerCase().replace(/[.\s]+/g,' ').trim();
+  const num=x=>(String(x).match(/bài\s*(\d+)/i)||[])[1];
+  const T=S.topics.filter(t=>t.name);
+  return (T.find(t=>norm(t.name)===norm(s))||(num(s)&&T.find(t=>num(t.name)===num(s)))||T.find(t=>norm(s).includes(norm(t.name))||norm(t.name).includes(norm(s)))||{name:s}).name;
+}
+/* điền câu đã đọc vào đúng ô trống của ma trận (cùng dạng, mức độ, bài); không có ô thì thêm mới */
+function placeParsed(list){
+  let filled=0,added=0;
+  list.forEach(p=>{
+    const free=S.questions.filter(q=>q.type===p.type&&isBlankQ(q));
+    const tl=q=>q.type==='tf'?q.tf.map((_,k)=>tfLv(q,k)).join():String(q.level);
+    const pl=p.type==='tf'?p.tf.map(x=>x.level??'?').join():p._lv?String(p.level):'?';
+    const lvOk=q=>{const a=tl(q).split(','),b=pl.split(',');return a.every((x,k)=>b[k]==='?'||b[k]==null||String(b[k])===x)};
+    const slot=free.find(q=>q.topic===p.topic&&lvOk(q))||free.find(lvOk)||free.find(q=>q.topic===p.topic)||free[0];
+    if(!slot){delete p._lv;S.questions.push(p);added++;return}
+    const keep={id:slot.id,topic:p.topic&&S.topics.some(t=>t.name===p.topic)?p.topic:slot.topic||p.topic,points:p.points||slot.points};
+    if(p.type==='tf')p.tf=p.tf.map((x,k)=>({...x,level:x.level??tfLv(slot,k)}));
+    if(!p._lv)keep.level=slot.level;
+    delete p._lv;Object.assign(slot,p,keep);filled++;
+  });
+  return {filled,added};
 }
 
 /* ---------- các màn hình ---------- */
@@ -1171,7 +1238,7 @@ function openEditor(id){
 function importHTML(){
   return `<div class="m-head"><h2>Dán đề có sẵn hoặc kết quả AI</h2><button class="icon" data-act="close" aria-label="Đóng">×</button></div>
   <div class="m-body">
-    <p class="hint">Mở Word, chọn toàn bộ đề (Ctrl+A), sao chép rồi dán vào ô dưới. Mỗi câu bắt đầu bằng “Câu 1.”, phương án “A.” đến “D.”, ý đúng/sai “a)” đến “d)”, và dòng “Đáp án:”. Hình vẽ và công thức dạng ảnh cần thêm lại trong Word sau khi xuất.</p>
+    <p class="hint">Mở Word, chọn toàn bộ đề (Ctrl+A), sao chép rồi dán vào ô dưới. Mỗi câu bắt đầu bằng “Câu 1.”, phương án “A.” đến “D.”, ý đúng/sai “a)” đến “d)”, và dòng “Đáp án:”. Đúng/Sai tính theo ý thì ghi “Câu dẫn: …”, rồi mỗi nhận định là một câu “Câu 7. …” với “Đáp án: Đúng” hoặc “Sai”. Dòng “Bài: …” giúp xếp câu vào đúng bài trong ma trận. Hình vẽ và công thức dạng ảnh cần thêm lại trong Word sau khi xuất.</p>
     <details><summary>Xem mẫu định dạng</summary><pre class="sample">Câu 1. Bậc của đa thức x³y + 2x² − 5 là
 A. 2     B. 3     C. 4     D. 5
 Đáp án: C
@@ -1204,9 +1271,10 @@ function previewImport(){
   parsed=parseText(document.getElementById('imp-text').value,+document.getElementById('imp-level').value);
   const out=document.getElementById('imp-result');
   if(!parsed.length){out.innerHTML='<p class="pill bad">Chưa nhận ra câu nào. Kiểm tra mỗi câu có bắt đầu bằng “Câu 1.” không.</p>';return}
-  const c={};TYK.forEach(t=>c[t]=parsed.filter(q=>q.type===t).length);
+  const c={};TYK.forEach(t=>c[t]=units(parsed.filter(q=>q.type===t)).length);
+  const slots=S.questions.filter(isBlankQ).length;
   const noAns=parsed.filter(q=>(q.type==='mcq'&&!q.answer)||(q.type==='short'&&!q.short)).length;
-  out.innerHTML=`<div class="row">${TYK.filter(t=>c[t]).map(t=>`<span class="pill ok">${c[t]} câu ${TY[t]}</span>`).join('')}${noAns?`<span class="pill warn">${noAns} câu chưa có đáp án</span>`:''}</div>`;
+  out.innerHTML=`<div class="row">${TYK.filter(t=>c[t]).map(t=>`<span class="pill ok">${c[t]} câu ${TY[t]}</span>`).join('')}${noAns?`<span class="pill warn">${noAns} câu chưa có đáp án</span>`:''}</div>${slots?`<p class="hint">Các câu sẽ được điền vào ${slots} ô trống của ma trận theo dạng câu, mức độ và bài.</p>`:''}`;
 }
 function aiHTML(){
   return `<div class="m-head"><h2>Câu lệnh cho ChatGPT / Gemini</h2><button class="icon" data-act="close" aria-label="Đóng">×</button></div>
@@ -1288,7 +1356,7 @@ const ACT={
   'copy-ai':()=>copyText('ai-text'),
   import:()=>{parsed=[];openModal(importHTML())},
   'imp-preview':()=>previewImport(),
-  'imp-add':()=>{previewImport();if(!parsed.length)return;S.questions.push(...parsed);const n=parsed.length;parsed=[];closeModal();S.ui.filter='all';S.view='questions';render();toast(`Đã thêm ${n} câu. Hãy đọc lại từng câu.`)},
+  'imp-add':()=>{previewImport();if(!parsed.length)return;const r=placeParsed(parsed);parsed=[];closeModal();S.ui.filter='all';S.view='questions';render();toast(`${r.filled?`Đã điền ${r.filled} ô theo ma trận`:''}${r.filled&&r.added?', ':''}${r.added?`${r.filled?'thêm':'Đã thêm'} ${r.added} câu mới`:''}. Hãy đọc lại từng câu.`)},
   'save-q':()=>{
     if(Enew)S.questions.push(E);else{const i=S.questions.findIndex(q=>q.id===E.id);S.questions[i]=E}
     const nw=Enew;closeModal();render();toast(nw?'Đã thêm câu hỏi.':'Đã lưu câu hỏi.');
